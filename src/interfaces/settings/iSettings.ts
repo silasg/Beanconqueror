@@ -47,6 +47,7 @@ export interface ISettings {
     ARCHIVED: IBrewPageFilter
   };
 
+  alternative_brew_information: boolean;
 
   welcome_page_showed: boolean;
 
