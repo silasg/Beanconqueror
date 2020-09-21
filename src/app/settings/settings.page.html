@@ -69,6 +69,12 @@
 
 
       <ion-item>
+        <ion-label>{{"PAGE_SETTINGS_ALTERNATIVE_BREW_INFORMATION" | translate}}</ion-label>
+        <ion-checkbox (ngModelChange)="saveSettings();"
+                      [(ngModel)]="settings.alternative_brew_information"></ion-checkbox>
+      </ion-item>
+
+      <ion-item>
         <ion-label>{{"PAGE_SETTINGS_SHOW_ARCHIVED_BEANS" | translate}}</ion-label>
         <ion-checkbox (ngModelChange)="saveSettings();"
                       [(ngModel)]="settings.show_archived_beans"></ion-checkbox>

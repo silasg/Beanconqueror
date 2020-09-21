@@ -45,6 +45,8 @@ export class Settings implements ISettings {
   public show_archived_mills: boolean;
   public show_archived_preparations: boolean;
 
+  public alternative_brew_information: boolean;
+
   public welcome_page_showed: boolean;
 
   public brew_filter: {
@@ -95,6 +97,8 @@ export class Settings implements ISettings {
 
     this.brew_filter.OPEN = {bean: [], method_of_preparation: [], mill: []} as IBrewPageFilter;
     this.brew_filter.ARCHIVED = {bean: [], method_of_preparation: [], mill: []} as IBrewPageFilter;
+
+    this.alternative_brew_information = false;
 
     this.welcome_page_showed = false;
   }
