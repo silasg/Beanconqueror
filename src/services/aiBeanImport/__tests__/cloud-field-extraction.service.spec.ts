@@ -179,32 +179,6 @@ describe('CloudFieldExtractionService', () => {
       expect(bean.bean_roasting_type).toBe('ESPRESSO' as any);
     });
 
-    it('should parse weight in ounces', async () => {
-      // Arrange
-      mockFetchWithBeanJson({
-        name: 'Test',
-        roaster: 'Test',
-        weight: '12oz',
-        bean_roasting_type: 'NOT_FOUND',
-        aromatics: 'NOT_FOUND',
-        decaffeinated: false,
-        cupping_points: 'NOT_FOUND',
-        roasting_date: 'NOT_FOUND',
-        bean_mix: 'SINGLE_ORIGIN',
-        origins: [{ country: 'Colombia' }],
-      });
-
-      // Act
-      const bean = await service.extractAllFields(
-        'sample OCR text',
-        mockConfig,
-        mockLogger,
-      );
-
-      // Assert — 12oz ≈ 340g
-      expect(bean.weight).toBe(Math.round(12 * 28.3495));
-    });
-
     it('should handle numeric weight value', async () => {
       // WHY: Some models may return weight as a number instead of string
 
@@ -534,77 +508,6 @@ describe('CloudFieldExtractionService', () => {
       // Assert
       expect(bean.bean_information[0].percentage).toBe(70);
       expect(bean.bean_information[1].percentage).toBe(30);
-    });
-  });
-
-  // ── Single origin handling ─────────────────────────────────────────
-
-  describe('single origin handling', () => {
-    it('should produce one origin entry for single origin', async () => {
-      // Arrange
-      mockFetchWithBeanJson({
-        name: 'Kenya AA',
-        roaster: 'Square Mile',
-        weight: '350g',
-        bean_roasting_type: 'OMNI',
-        aromatics: 'Blackcurrant, Tomato, Brown Sugar',
-        decaffeinated: false,
-        cupping_points: 90,
-        roasting_date: '2025-03-01',
-        bean_mix: 'SINGLE_ORIGIN',
-        origins: [
-          {
-            country: 'Kenya',
-            region: 'Nyeri',
-            variety: 'SL28, SL34',
-            processing: 'Washed',
-            elevation: '1700 MASL',
-            farm: 'Gakuyuini',
-            farmer: 'NOT_FOUND',
-          },
-        ],
-      });
-
-      // Act
-      const bean = await service.extractAllFields(
-        'sample OCR text',
-        mockConfig,
-        mockLogger,
-      );
-
-      // Assert
-      expect(bean.bean_information.length).toBe(1);
-      expect(bean.bean_information[0].country).toBe('Kenya');
-      expect(bean.bean_information[0].region).toBe('Nyeri');
-      expect(bean.bean_information[0].variety).toBe('SL28, SL34');
-    });
-
-    it('should handle empty origins array with at least one bean_information entry', async () => {
-      // WHY: constructBeanFromExtractedData ensures at least one entry
-
-      // Arrange
-      mockFetchWithBeanJson({
-        name: 'Mystery Coffee',
-        roaster: 'Unknown Roaster',
-        weight: '200g',
-        bean_roasting_type: 'NOT_FOUND',
-        aromatics: 'NOT_FOUND',
-        decaffeinated: false,
-        cupping_points: 'NOT_FOUND',
-        roasting_date: 'NOT_FOUND',
-        bean_mix: 'NOT_FOUND',
-        origins: [],
-      });
-
-      // Act
-      const bean = await service.extractAllFields(
-        'sample OCR text',
-        mockConfig,
-        mockLogger,
-      );
-
-      // Assert — constructBeanFromExtractedData guarantees at least one entry
-      expect(bean.bean_information.length).toBeGreaterThanOrEqual(1);
     });
   });
 

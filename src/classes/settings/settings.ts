@@ -250,7 +250,6 @@ export class Settings implements ISettings {
   public cloud_ai_api_key: string;
   public cloud_ai_model: string;
   public cloud_ai_base_url: string;
-  public cloud_ai_send_images: boolean;
 
   public show_backup_issues: boolean;
 
@@ -593,7 +592,6 @@ export class Settings implements ISettings {
     this.cloud_ai_api_key = '';
     this.cloud_ai_model = '';
     this.cloud_ai_base_url = '';
-    this.cloud_ai_send_images = false;
 
     this.show_backup_issues = true;
 
@@ -675,11 +673,6 @@ export class Settings implements ISettings {
       this.cloud_ai_base_url = '';
     } else {
       this.cloud_ai_base_url = settingsObj.cloud_ai_base_url;
-    }
-    if (settingsObj.cloud_ai_send_images === undefined) {
-      this.cloud_ai_send_images = false;
-    } else {
-      this.cloud_ai_send_images = settingsObj.cloud_ai_send_images;
     }
   }
 

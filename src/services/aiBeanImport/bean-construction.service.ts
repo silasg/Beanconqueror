@@ -4,6 +4,7 @@ import { BEAN_ROASTING_TYPE_ENUM } from '../../enums/beans/beanRoastingType';
 import { BEAN_MIX_ENUM } from '../../enums/beans/mix';
 import { ROASTS_ENUM } from '../../enums/beans/roasts';
 import { IBeanInformation } from '../../interfaces/bean/iBeanInformation';
+import { IBeanRoastInformation } from '../../interfaces/bean/iBeanRoastInformation';
 import { IFlavor } from '../../interfaces/flavor/iFlavor';
 import {
   OriginFieldsResult,
@@ -58,7 +59,19 @@ export function createDefaultBean(): Bean {
     bean_information: [],
     url: '',
     ean_article_number: '',
-    bean_roast_information: {} as any,
+    bean_roast_information: {
+      drop_temperature: 0,
+      roast_length: 0,
+      roaster_machine: '',
+      green_bean_weight: 0,
+      outside_temperature: 0,
+      humidity: 0,
+      bean_uuid: '',
+      first_crack_minute: 0,
+      first_crack_temperature: 0,
+      second_crack_minute: 0,
+      second_crack_temperature: 0,
+    } as IBeanRoastInformation,
     rating: 0,
     qr_code: '',
     internal_share_code: '',

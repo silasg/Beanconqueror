@@ -1,20 +1,6 @@
-/**
- * Unified cloud prompt for extracting all bean fields in a single LLM call.
- *
- * Cloud models (Gemini, GPT, Claude) have large context windows (128K+),
- * so all fields can be extracted at once instead of 10+ sequential calls.
- *
- * Anti-hallucination rules live in the system instructions (highest priority).
- * The extraction prompt contains OCR context, field definitions, and the
- * expected JSON response schema.
- */
-
-/**
- * System-level instructions for cloud bean extraction calls.
- *
- * Kept separate from the extraction prompt so providers that support
- * a dedicated system/instructions slot can use it for higher priority.
- */
+// System-level instructions for cloud bean extraction calls.
+// Kept separate from the extraction prompt so providers that support
+// a dedicated system/instructions slot can use it for higher priority.
 export const CLOUD_BEAN_IMPORT_SYSTEM_INSTRUCTIONS = `You are a coffee label data extractor. You extract structured data from OCR text captured from coffee bean bag labels.
 
 CRITICAL RULES — NEVER VIOLATE:

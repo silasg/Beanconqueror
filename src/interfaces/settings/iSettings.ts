@@ -236,7 +236,6 @@ export interface ISettings {
   cloud_ai_api_key: string;
   cloud_ai_model: string;
   cloud_ai_base_url: string;
-  cloud_ai_send_images: boolean;
 
   show_backup_issues: boolean;
 

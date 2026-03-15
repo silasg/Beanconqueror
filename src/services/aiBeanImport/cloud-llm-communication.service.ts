@@ -51,10 +51,15 @@ function buildHeaders(
       'Content-Type': 'application/json',
     };
   }
-  return {
+  const headers: Record<string, string> = {
     Authorization: `Bearer ${apiKey}`,
     'Content-Type': 'application/json',
   };
+  if (provider === CLOUD_AI_PROVIDER_ENUM.OPENROUTER) {
+    headers['HTTP-Referer'] = 'https://beanconqueror.com';
+    headers['X-OpenRouter-Title'] = 'Beanconqueror';
+  }
+  return headers;
 }
 
 function buildRequestBody(
@@ -68,6 +73,7 @@ function buildRequestBody(
     return {
       model,
       max_tokens: 4096,
+      temperature: 0.1,
       system: systemMsg?.content ?? '',
       messages: userMsgs.map((m) => ({ role: m.role, content: m.content })),
     };
@@ -84,26 +90,40 @@ function getEndpointPath(provider: CLOUD_AI_PROVIDER_ENUM): string {
   return '/chat/completions';
 }
 
+interface AnthropicApiResponse {
+  content?: Array<{ text?: string }>;
+  model?: string;
+  usage?: { input_tokens: number; output_tokens: number };
+}
+
+interface OpenAIApiResponse {
+  choices?: Array<{ message?: { content?: string } }>;
+  model?: string;
+  usage?: { prompt_tokens: number; completion_tokens: number };
+}
+
 function parseResponse(
   provider: CLOUD_AI_PROVIDER_ENUM,
-  body: any,
+  body: unknown,
 ): CloudLLMResponse {
   if (provider === CLOUD_AI_PROVIDER_ENUM.ANTHROPIC) {
+    const data = body as AnthropicApiResponse;
     return {
-      content: body.content?.[0]?.text ?? '',
-      model: body.model ?? '',
-      usage: body.usage
+      content: data.content?.[0]?.text ?? '',
+      model: data.model ?? '',
+      usage: data.usage
         ? {
-            prompt_tokens: body.usage.input_tokens,
-            completion_tokens: body.usage.output_tokens,
+            prompt_tokens: data.usage.input_tokens,
+            completion_tokens: data.usage.output_tokens,
           }
         : undefined,
     };
   }
+  const data = body as OpenAIApiResponse;
   return {
-    content: body.choices?.[0]?.message?.content ?? '',
-    model: body.model ?? '',
-    usage: body.usage,
+    content: data.choices?.[0]?.message?.content ?? '',
+    model: data.model ?? '',
+    usage: data.usage,
   };
 }
 
@@ -143,7 +163,7 @@ export async function sendCloudLLMPrompt(
       throw new Error(`Cloud LLM API error (${response.status}): ${errorBody}`);
     }
 
-    const body = await response.json();
+    const body: unknown = await response.json();
     return parseResponse(config.provider, body);
   } catch (error) {
     clearTimeout(timeout);

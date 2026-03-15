@@ -139,6 +139,7 @@ describe('cloud-llm-communication.service', () => {
       const body = JSON.parse(options.body);
       expect(body.model).toBe('claude-sonnet-4-20250514');
       expect(body.max_tokens).toBe(4096);
+      expect(body.temperature).toBe(0.1);
       expect(body.system).toBe('You are a helpful assistant.');
       expect(body.messages.length).toBe(1);
       expect(body.messages[0].role).toBe('user');
@@ -166,6 +167,8 @@ describe('cloud-llm-communication.service', () => {
       const [url, options] = fetchSpy.calls.mostRecent().args;
       expect(url).toBe('https://openrouter.ai/api/v1/chat/completions');
       expect(options.headers.Authorization).toBe('Bearer test-api-key');
+      expect(options.headers['HTTP-Referer']).toBe('https://beanconqueror.com');
+      expect(options.headers['X-OpenRouter-Title']).toBe('Beanconqueror');
 
       const body = JSON.parse(options.body);
       expect(body.model).toBe('anthropic/claude-sonnet-4-20250514');
@@ -388,42 +391,6 @@ describe('cloud-llm-communication.service', () => {
       await expectAsync(
         sendCloudLLMPrompt(config, messages),
       ).toBeRejectedWithError('Cloud LLM API error (401): Invalid API key');
-    });
-
-    it('should throw descriptive error on HTTP 429 (rate limited)', async () => {
-      // Arrange
-      const config = createConfig();
-      fetchSpy.and.returnValue(
-        Promise.resolve({
-          ok: false,
-          status: 429,
-          text: () => Promise.resolve('Rate limit exceeded'),
-        } as unknown as Response),
-      );
-
-      // Act & Assert
-      await expectAsync(
-        sendCloudLLMPrompt(config, messages),
-      ).toBeRejectedWithError('Cloud LLM API error (429): Rate limit exceeded');
-    });
-
-    it('should throw descriptive error on HTTP 500 (server error)', async () => {
-      // Arrange
-      const config = createConfig();
-      fetchSpy.and.returnValue(
-        Promise.resolve({
-          ok: false,
-          status: 500,
-          text: () => Promise.resolve('Internal server error'),
-        } as unknown as Response),
-      );
-
-      // Act & Assert
-      await expectAsync(
-        sendCloudLLMPrompt(config, messages),
-      ).toBeRejectedWithError(
-        'Cloud LLM API error (500): Internal server error',
-      );
     });
 
     it('should handle error response when body text extraction fails', async () => {

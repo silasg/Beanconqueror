@@ -27,17 +27,35 @@ import {
   extractJsonFromResponse,
   isNullLikeValue,
 } from './llm-communication.service';
+import { parseWeightToGrams } from './weight-parsing';
 
-/**
- * Service for extracting all bean fields in a single cloud LLM call.
- *
- * Orchestrates the full cloud extraction pipeline:
- * 1. Build config from caller-supplied settings
- * 2. Build the unified extraction prompt
- * 3. Send to cloud LLM provider
- * 4. Parse JSON response
- * 5. Map response to shared types and construct a Bean
- */
+/** Shape of the JSON object returned by the cloud LLM. */
+interface ParsedCloudResponse {
+  name?: string | null;
+  roaster?: string | null;
+  weight?: string | number | null;
+  bean_roasting_type?: string | null;
+  aromatics?: string | null;
+  decaffeinated?: boolean | string | null;
+  cupping_points?: number | string | null;
+  roasting_date?: string | null;
+  bean_mix?: string | null;
+  origins?: ParsedCloudOrigin[];
+}
+
+/** Shape of a single origin entry in the cloud LLM JSON response. */
+interface ParsedCloudOrigin {
+  country?: string | null;
+  region?: string | null;
+  variety?: string | null;
+  processing?: string | null;
+  elevation?: string | null;
+  farm?: string | null;
+  farmer?: string | null;
+  percentage?: number | string | null;
+}
+
+// Orchestrates cloud LLM-based extraction of all bean fields from OCR text.
 @Injectable({ providedIn: 'root' })
 export class CloudFieldExtractionService {
   private uiSettingsStorage = inject(UISettingsStorage, { optional: true });
@@ -88,7 +106,9 @@ export class CloudFieldExtractionService {
       }
 
       // 4. Parse JSON from response (handle potential markdown wrapping)
-      const parsed = extractJsonFromResponse(response.content);
+      const parsed = extractJsonFromResponse<ParsedCloudResponse>(
+        response.content,
+      );
       if (!parsed) {
         log.log('Failed to parse JSON from cloud LLM response');
         return createDefaultBean();
@@ -110,7 +130,7 @@ export class CloudFieldExtractionService {
    * Map the parsed JSON response to TopLevelFieldsResult.
    * Uses isNullLikeValue to strip NOT_FOUND/null/unknown responses.
    */
-  private mapTopLevelFields(parsed: any): TopLevelFieldsResult {
+  private mapTopLevelFields(parsed: ParsedCloudResponse): TopLevelFieldsResult {
     const result: TopLevelFieldsResult = {
       name: '',
       roaster: '',
@@ -132,7 +152,7 @@ export class CloudFieldExtractionService {
       if (typeof parsed.weight === 'number') {
         result.weight = parsed.weight;
       } else if (!isNullLikeValue(String(parsed.weight))) {
-        result.weight = this.parseWeight(String(parsed.weight));
+        result.weight = parseWeightToGrams(String(parsed.weight)) ?? 0;
       }
     }
 
@@ -183,7 +203,7 @@ export class CloudFieldExtractionService {
    * Map the parsed JSON response to OriginFieldsResult.
    * Maps bean_mix and origins array to the shared types.
    */
-  private mapOriginFields(parsed: any): OriginFieldsResult {
+  private mapOriginFields(parsed: ParsedCloudResponse): OriginFieldsResult {
     const result: OriginFieldsResult = {
       beanMix: BEAN_MIX_ENUM.UNKNOWN,
       bean_information: [],
@@ -196,7 +216,7 @@ export class CloudFieldExtractionService {
 
     // Origins — each entry maps to an IBeanInformation
     if (Array.isArray(parsed.origins)) {
-      result.bean_information = parsed.origins.map((origin: any) =>
+      result.bean_information = parsed.origins.map((origin) =>
         this.mapOrigin(origin),
       );
     }
@@ -207,7 +227,7 @@ export class CloudFieldExtractionService {
   /**
    * Map a single origin object from JSON to IBeanInformation.
    */
-  private mapOrigin(origin: any): IBeanInformation {
+  private mapOrigin(origin: ParsedCloudOrigin): IBeanInformation {
     const info = createEmptyBeanInformation();
 
     if (!isNullLikeValue(origin.country)) {
@@ -275,35 +295,5 @@ export class CloudFieldExtractionService {
       default:
         return BEAN_MIX_ENUM.UNKNOWN;
     }
-  }
-
-  /**
-   * Parse a weight string (e.g. "250g", "1kg", "12oz") to grams.
-   * Mirrors the conversion logic in TextNormalizationService.extractWeight.
-   */
-  private parseWeight(weightStr: string): number {
-    const str = weightStr.toLowerCase().trim();
-
-    const kgMatch = /(\d+(?:[.,]\d+)?)\s*(?:kg|kilo(?:gram)?s?)/.exec(str);
-    if (kgMatch) {
-      return Math.round(parseFloat(kgMatch[1].replace(',', '.')) * 1000);
-    }
-
-    const ozMatch = /(\d+(?:[.,]\d+)?)\s*(?:oz|ounces?)/.exec(str);
-    if (ozMatch) {
-      return Math.round(parseFloat(ozMatch[1].replace(',', '.')) * 28.3495);
-    }
-
-    const lbMatch = /(\d+(?:[.,]\d+)?)\s*(?:lb|lbs?|pounds?)/.exec(str);
-    if (lbMatch) {
-      return Math.round(parseFloat(lbMatch[1].replace(',', '.')) * 453.592);
-    }
-
-    const gMatch = /(\d+(?:[.,]\d+)?)\s*(?:g(?:rams?)?)?/.exec(str);
-    if (gMatch) {
-      return Math.round(parseFloat(gMatch[1].replace(',', '.')));
-    }
-
-    return 0;
   }
 }
