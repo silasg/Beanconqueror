@@ -3,7 +3,6 @@ import { CLOUD_AI_PROVIDER_ENUM } from '../../enums/settings/cloudAiProvider';
 export interface CloudModel {
   id: string;
   name: string;
-  supportsVision: boolean;
   contextLength?: number;
 }
 
@@ -42,7 +41,6 @@ interface RawMistralModel {
 interface RawOpenRouterModel {
   id: string;
   name?: string;
-  architecture?: { input_modalities?: string[] };
   context_length?: number;
 }
 
@@ -102,7 +100,7 @@ function buildProviderConfig(
         },
         mapModel: (raw: unknown) => {
           const m = raw as RawOpenAIModel;
-          return { id: m.id, name: m.id, supportsVision: false };
+          return { id: m.id, name: m.id };
         },
       };
 
@@ -119,7 +117,6 @@ function buildProviderConfig(
           return {
             id: m.id,
             name: m.display_name ?? m.id,
-            supportsVision: false,
           };
         },
       };
@@ -140,7 +137,6 @@ function buildProviderConfig(
           return {
             id: (m.name ?? '').replace(/^models\//, ''),
             name: m.displayName ?? m.name ?? '',
-            supportsVision: true,
           };
         },
       };
@@ -156,7 +152,7 @@ function buildProviderConfig(
         },
         mapModel: (raw: unknown) => {
           const m = raw as RawMistralModel;
-          return { id: m.id, name: m.id, supportsVision: false };
+          return { id: m.id, name: m.id };
         },
       };
 
@@ -170,8 +166,6 @@ function buildProviderConfig(
           return {
             id: m.id,
             name: m.name ?? m.id,
-            supportsVision:
-              m.architecture?.input_modalities?.includes('image') ?? false,
             contextLength: m.context_length,
           };
         },
@@ -185,7 +179,7 @@ function buildProviderConfig(
         responseKey: 'data',
         mapModel: (raw: unknown) => {
           const m = raw as RawCustomModel;
-          return { id: m.id, name: m.id, supportsVision: false };
+          return { id: m.id, name: m.id };
         },
       };
     }

@@ -216,7 +216,7 @@ describe('cloud-model-list.service', () => {
   // ── Provider-specific mapping & filtering ──────────────────────────
 
   describe('OpenRouter', () => {
-    it('should map input_modalities to supportsVision', async () => {
+    it('should map context_length from API response', async () => {
       // Arrange
       fetchSpy.and.returnValue(
         Promise.resolve(
@@ -225,13 +225,11 @@ describe('cloud-model-list.service', () => {
               {
                 id: 'openai/gpt-4o',
                 name: 'GPT-4o',
-                architecture: { input_modalities: ['text', 'image'] },
                 context_length: 128000,
               },
               {
                 id: 'anthropic/claude-sonnet-4-20250514',
                 name: 'Claude Sonnet',
-                architecture: { input_modalities: ['text'] },
                 context_length: 200000,
               },
             ],
@@ -251,31 +249,8 @@ describe('cloud-model-list.service', () => {
       const claude = models.find(
         (m) => m.id === 'anthropic/claude-sonnet-4-20250514',
       );
-      expect(gpt4o.supportsVision).toBe(true);
       expect(gpt4o.contextLength).toBe(128000);
-      expect(claude.supportsVision).toBe(false);
       expect(claude.contextLength).toBe(200000);
-    });
-
-    it('should handle missing architecture gracefully', async () => {
-      // Arrange
-      fetchSpy.and.returnValue(
-        Promise.resolve(
-          mockFetchResponse({
-            data: [{ id: 'some/model', name: 'Some Model' }],
-          }),
-        ),
-      );
-
-      // Act
-      const models = await fetchAvailableModels(
-        CLOUD_AI_PROVIDER_ENUM.OPENROUTER,
-        '',
-      );
-
-      // Assert
-      expect(models.length).toBe(1);
-      expect(models[0].supportsVision).toBe(false);
     });
   });
 
@@ -340,7 +315,6 @@ describe('cloud-model-list.service', () => {
       // Assert
       expect(models[0].id).toBe('gpt-4o');
       expect(models[0].name).toBe('gpt-4o');
-      expect(models[0].supportsVision).toBe(false);
     });
   });
 
@@ -371,7 +345,6 @@ describe('cloud-model-list.service', () => {
       expect(models.length).toBe(2);
       const sonnet = models.find((m) => m.id === 'claude-sonnet-4-20250514');
       expect(sonnet.name).toBe('Claude Sonnet 4');
-      expect(sonnet.supportsVision).toBe(false);
     });
 
     it('should fall back to id when display_name is missing', async () => {
@@ -436,32 +409,6 @@ describe('cloud-model-list.service', () => {
       expect(ids).not.toContain('embedding-001');
       expect(ids).not.toContain('models/gemini-2.0-flash');
     });
-
-    it('should set all Gemini models as supportsVision', async () => {
-      // Arrange
-      fetchSpy.and.returnValue(
-        Promise.resolve(
-          mockFetchResponse({
-            models: [
-              {
-                name: 'models/gemini-2.0-flash',
-                displayName: 'Gemini 2.0 Flash',
-                supportedGenerationMethods: ['generateContent'],
-              },
-            ],
-          }),
-        ),
-      );
-
-      // Act
-      const models = await fetchAvailableModels(
-        CLOUD_AI_PROVIDER_ENUM.GOOGLE,
-        'test-key',
-      );
-
-      // Assert
-      expect(models[0].supportsVision).toBe(true);
-    });
   });
 
   describe('Mistral', () => {
@@ -513,7 +460,6 @@ describe('cloud-model-list.service', () => {
       // Assert
       expect(models[0].id).toBe('mistral-large-latest');
       expect(models[0].name).toBe('mistral-large-latest');
-      expect(models[0].supportsVision).toBe(false);
     });
   });
 
