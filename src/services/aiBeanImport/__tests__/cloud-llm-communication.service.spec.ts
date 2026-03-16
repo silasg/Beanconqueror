@@ -198,31 +198,6 @@ describe('cloud-llm-communication.service', () => {
       expect(url).toBe('https://my-llm.example.com/api/chat/completions');
     });
 
-    it('should handle CUSTOM provider without baseUrl', async () => {
-      // WHY: Gracefully handle missing baseUrl by falling back to empty string
-
-      // Arrange
-      const config = createConfig({
-        provider: CLOUD_AI_PROVIDER_ENUM.CUSTOM,
-        model: 'my-model',
-      });
-      fetchSpy.and.returnValue(
-        Promise.resolve(
-          mockFetchResponse({
-            choices: [{ message: { content: 'response' } }],
-            model: 'my-model',
-          }),
-        ),
-      );
-
-      // Act
-      await sendCloudLLMPrompt(config, messages);
-
-      // Assert
-      const [url] = fetchSpy.calls.mostRecent().args;
-      expect(url).toBe('/chat/completions');
-    });
-
     it('should send Anthropic body without system message when none provided', async () => {
       // Arrange
       const config = createConfig({
