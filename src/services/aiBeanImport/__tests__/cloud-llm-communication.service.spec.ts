@@ -174,12 +174,12 @@ describe('cloud-llm-communication.service', () => {
       expect(body.model).toBe('anthropic/claude-sonnet-4-20250514');
     });
 
-    it('should use custom base URL for CUSTOM provider', async () => {
+    it('should strip trailing slash from custom base URL', async () => {
       // Arrange
       const config = createConfig({
         provider: CLOUD_AI_PROVIDER_ENUM.CUSTOM,
         model: 'my-model',
-        baseUrl: 'https://my-llm.example.com/api',
+        baseUrl: 'https://my-llm.example.com/api/',
       });
       fetchSpy.and.returnValue(
         Promise.resolve(
