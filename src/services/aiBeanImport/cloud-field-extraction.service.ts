@@ -29,32 +29,6 @@ import {
 } from './llm-communication.service';
 import { parseWeightToGrams } from './weight-parsing';
 
-/** Shape of the JSON object returned by the cloud LLM. */
-interface ParsedCloudResponse {
-  name?: string | null;
-  roaster?: string | null;
-  weight?: string | number | null;
-  bean_roasting_type?: string | null;
-  aromatics?: string | null;
-  decaffeinated?: boolean | string | null;
-  cupping_points?: number | string | null;
-  roasting_date?: string | null;
-  bean_mix?: string | null;
-  origins?: ParsedCloudOrigin[];
-}
-
-/** Shape of a single origin entry in the cloud LLM JSON response. */
-interface ParsedCloudOrigin {
-  country?: string | null;
-  region?: string | null;
-  variety?: string | null;
-  processing?: string | null;
-  elevation?: string | null;
-  farm?: string | null;
-  farmer?: string | null;
-  percentage?: number | string | null;
-}
-
 // Orchestrates cloud LLM-based extraction of all bean fields from OCR text.
 @Injectable({ providedIn: 'root' })
 export class CloudFieldExtractionService {
@@ -106,9 +80,8 @@ export class CloudFieldExtractionService {
       }
 
       // 4. Parse JSON from response (handle potential markdown wrapping)
-      const parsed = extractJsonFromResponse<ParsedCloudResponse>(
-        response.content,
-      );
+      // LLM response is unvalidated — all field access below is defensive
+      const parsed = extractJsonFromResponse(response.content);
       if (!parsed) {
         log.log('Failed to parse JSON from cloud LLM response');
         return createDefaultBean();
@@ -130,7 +103,8 @@ export class CloudFieldExtractionService {
    * Map the parsed JSON response to TopLevelFieldsResult.
    * Uses isNullLikeValue to strip NOT_FOUND/null/unknown responses.
    */
-  private mapTopLevelFields(parsed: ParsedCloudResponse): TopLevelFieldsResult {
+  private mapTopLevelFields(parsed: unknown): TopLevelFieldsResult {
+    const rec = parsed as Record<string, unknown>;
     const result: TopLevelFieldsResult = {
       name: '',
       roaster: '',
@@ -138,53 +112,52 @@ export class CloudFieldExtractionService {
     };
 
     // Name
-    if (!isNullLikeValue(parsed.name)) {
-      result.name = String(parsed.name).trim();
+    if (!isNullLikeValue(rec.name as string)) {
+      result.name = String(rec.name).trim();
     }
 
     // Roaster
-    if (!isNullLikeValue(parsed.roaster)) {
-      result.roaster = String(parsed.roaster).trim();
+    if (!isNullLikeValue(rec.roaster as string)) {
+      result.roaster = String(rec.roaster).trim();
     }
 
     // Weight — JSON returns "250g", "1kg", "12oz" etc.; parse to grams
-    if (parsed.weight !== null) {
-      if (typeof parsed.weight === 'number') {
-        result.weight = parsed.weight;
-      } else if (!isNullLikeValue(String(parsed.weight))) {
-        result.weight = parseWeightToGrams(String(parsed.weight)) ?? 0;
+    if (rec.weight !== null) {
+      if (typeof rec.weight === 'number') {
+        result.weight = rec.weight;
+      } else if (!isNullLikeValue(String(rec.weight))) {
+        result.weight = parseWeightToGrams(String(rec.weight)) ?? 0;
       }
     }
 
     // Bean roasting type — map "FILTER"/"ESPRESSO"/"OMNI" to enum
-    if (!isNullLikeValue(parsed.bean_roasting_type)) {
+    if (!isNullLikeValue(rec.bean_roasting_type as string)) {
       result.bean_roasting_type = this.mapRoastingType(
-        String(parsed.bean_roasting_type).trim(),
+        String(rec.bean_roasting_type).trim(),
       );
     }
 
     // Aromatics
-    if (!isNullLikeValue(parsed.aromatics)) {
-      result.aromatics = String(parsed.aromatics).trim();
+    if (!isNullLikeValue(rec.aromatics as string)) {
+      result.aromatics = String(rec.aromatics).trim();
     }
 
     // Decaffeinated — JSON returns boolean true/false
-    if (parsed.decaffeinated === true || parsed.decaffeinated === false) {
-      result.decaffeinated = parsed.decaffeinated;
+    if (rec.decaffeinated === true || rec.decaffeinated === false) {
+      result.decaffeinated = rec.decaffeinated;
     } else if (
-      parsed.decaffeinated !== null &&
-      !isNullLikeValue(String(parsed.decaffeinated))
+      rec.decaffeinated !== null &&
+      !isNullLikeValue(String(rec.decaffeinated))
     ) {
-      result.decaffeinated =
-        String(parsed.decaffeinated).toLowerCase() === 'true';
+      result.decaffeinated = String(rec.decaffeinated).toLowerCase() === 'true';
     }
 
     // Cupping points — JSON returns a number
-    if (parsed.cupping_points !== null) {
-      if (typeof parsed.cupping_points === 'number') {
-        result.cupping_points = parsed.cupping_points;
-      } else if (!isNullLikeValue(String(parsed.cupping_points))) {
-        const points = parseFloat(String(parsed.cupping_points));
+    if (rec.cupping_points !== null) {
+      if (typeof rec.cupping_points === 'number') {
+        result.cupping_points = rec.cupping_points;
+      } else if (!isNullLikeValue(String(rec.cupping_points))) {
+        const points = parseFloat(String(rec.cupping_points));
         if (!isNaN(points)) {
           result.cupping_points = points;
         }
@@ -192,8 +165,8 @@ export class CloudFieldExtractionService {
     }
 
     // Roasting date — JSON returns "YYYY-MM-DD"
-    if (!isNullLikeValue(parsed.roasting_date)) {
-      result.roastingDate = String(parsed.roasting_date).trim();
+    if (!isNullLikeValue(rec.roasting_date as string)) {
+      result.roastingDate = String(rec.roasting_date).trim();
     }
 
     return result;
@@ -203,20 +176,21 @@ export class CloudFieldExtractionService {
    * Map the parsed JSON response to OriginFieldsResult.
    * Maps bean_mix and origins array to the shared types.
    */
-  private mapOriginFields(parsed: ParsedCloudResponse): OriginFieldsResult {
+  private mapOriginFields(parsed: unknown): OriginFieldsResult {
+    const rec = parsed as Record<string, unknown>;
     const result: OriginFieldsResult = {
       beanMix: BEAN_MIX_ENUM.UNKNOWN,
       bean_information: [],
     };
 
     // Bean mix — map "SINGLE_ORIGIN"/"BLEND" to enum
-    if (!isNullLikeValue(parsed.bean_mix)) {
-      result.beanMix = this.mapBeanMix(String(parsed.bean_mix).trim());
+    if (!isNullLikeValue(rec.bean_mix as string)) {
+      result.beanMix = this.mapBeanMix(String(rec.bean_mix).trim());
     }
 
     // Origins — each entry maps to an IBeanInformation
-    if (Array.isArray(parsed.origins)) {
-      result.bean_information = parsed.origins.map((origin) =>
+    if (Array.isArray(rec.origins)) {
+      result.bean_information = rec.origins.map((origin) =>
         this.mapOrigin(origin),
       );
     }
@@ -227,37 +201,38 @@ export class CloudFieldExtractionService {
   /**
    * Map a single origin object from JSON to IBeanInformation.
    */
-  private mapOrigin(origin: ParsedCloudOrigin): IBeanInformation {
+  private mapOrigin(origin: unknown): IBeanInformation {
+    const rec = origin as Record<string, unknown>;
     const info = createEmptyBeanInformation();
 
-    if (!isNullLikeValue(origin.country)) {
-      info.country = String(origin.country).trim();
+    if (!isNullLikeValue(rec.country as string)) {
+      info.country = String(rec.country).trim();
     }
-    if (!isNullLikeValue(origin.region)) {
-      info.region = String(origin.region).trim();
+    if (!isNullLikeValue(rec.region as string)) {
+      info.region = String(rec.region).trim();
     }
-    if (!isNullLikeValue(origin.variety)) {
-      info.variety = String(origin.variety).trim();
+    if (!isNullLikeValue(rec.variety as string)) {
+      info.variety = String(rec.variety).trim();
     }
-    if (!isNullLikeValue(origin.processing)) {
-      info.processing = String(origin.processing).trim();
+    if (!isNullLikeValue(rec.processing as string)) {
+      info.processing = String(rec.processing).trim();
     }
-    if (!isNullLikeValue(origin.elevation)) {
-      info.elevation = String(origin.elevation).trim();
+    if (!isNullLikeValue(rec.elevation as string)) {
+      info.elevation = String(rec.elevation).trim();
     }
-    if (!isNullLikeValue(origin.farm)) {
-      info.farm = String(origin.farm).trim();
+    if (!isNullLikeValue(rec.farm as string)) {
+      info.farm = String(rec.farm).trim();
     }
-    if (!isNullLikeValue(origin.farmer)) {
-      info.farmer = String(origin.farmer).trim();
+    if (!isNullLikeValue(rec.farmer as string)) {
+      info.farmer = String(rec.farmer).trim();
     }
 
     // Percentage — handle numeric or string "60%"
-    if (origin.percentage !== null) {
-      if (typeof origin.percentage === 'number') {
-        info.percentage = origin.percentage;
-      } else if (!isNullLikeValue(String(origin.percentage))) {
-        const pct = parseFloat(String(origin.percentage).replace('%', ''));
+    if (rec.percentage !== null) {
+      if (typeof rec.percentage === 'number') {
+        info.percentage = rec.percentage;
+      } else if (!isNullLikeValue(String(rec.percentage))) {
+        const pct = parseFloat(String(rec.percentage).replace('%', ''));
         if (!isNaN(pct)) {
           info.percentage = pct;
         }

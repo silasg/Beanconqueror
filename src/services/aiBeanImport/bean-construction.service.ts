@@ -1,11 +1,7 @@
 import type { Bean } from '../../classes/bean/bean';
-import { BEAN_FREEZING_STORAGE_ENUM } from '../../enums/beans/beanFreezingStorage';
 import { BEAN_ROASTING_TYPE_ENUM } from '../../enums/beans/beanRoastingType';
 import { BEAN_MIX_ENUM } from '../../enums/beans/mix';
-import { ROASTS_ENUM } from '../../enums/beans/roasts';
 import { IBeanInformation } from '../../interfaces/bean/iBeanInformation';
-import { IBeanRoastInformation } from '../../interfaces/bean/iBeanRoastInformation';
-import { IFlavor } from '../../interfaces/flavor/iFlavor';
 import {
   OriginFieldsResult,
   TopLevelFieldsResult,
@@ -33,8 +29,10 @@ export function createEmptyBeanInformation(): IBeanInformation {
 
 /**
  * Create an empty Bean-compatible object with all default values.
- * Uses a plain object to avoid importing the Bean class at the module level,
- * which would trigger circular dependencies in the test bundle.
+ *
+ * Uses a plain object because importing the Bean class at runtime
+ * pulls in its full dependency tree (Angular services, Config, etc.)
+ * which causes "Bean is not a constructor" in Karma tests.
  */
 export function createDefaultBean(): Bean {
   return {
@@ -44,10 +42,10 @@ export function createDefaultBean(): Bean {
     note: '',
     roaster: '',
     config: { uuid: '', unix_timestamp: 0, attachments: [] },
-    roast: 'UNKNOWN' as ROASTS_ENUM,
+    roast: 'UNKNOWN',
     roast_range: 0,
     roast_custom: '',
-    beanMix: 'SINGLE_ORIGIN' as BEAN_MIX_ENUM,
+    beanMix: 'SINGLE_ORIGIN',
     aromatics: '',
     weight: 0,
     finished: false,
@@ -55,23 +53,11 @@ export function createDefaultBean(): Bean {
     attachments: [],
     decaffeinated: false,
     cupping_points: '',
-    bean_roasting_type: 'UNKNOWN' as BEAN_ROASTING_TYPE_ENUM,
+    bean_roasting_type: 'UNKNOWN',
     bean_information: [],
     url: '',
     ean_article_number: '',
-    bean_roast_information: {
-      drop_temperature: 0,
-      roast_length: 0,
-      roaster_machine: '',
-      green_bean_weight: 0,
-      outside_temperature: 0,
-      humidity: 0,
-      bean_uuid: '',
-      first_crack_minute: 0,
-      first_crack_temperature: 0,
-      second_crack_minute: 0,
-      second_crack_temperature: 0,
-    } as IBeanRoastInformation,
+    bean_roast_information: {},
     rating: 0,
     qr_code: '',
     internal_share_code: '',
@@ -91,12 +77,12 @@ export function createDefaultBean(): Bean {
       wet_aroma: 0,
       notes: '',
     },
-    cupped_flavor: { predefined_flavors: {}, custom_flavors: [] } as IFlavor,
+    cupped_flavor: { predefined_flavors: {}, custom_flavors: [] },
     frozenDate: '',
     unfrozenDate: '',
     frozenId: '',
     frozenGroupId: '',
-    frozenStorageType: 'UNKNOWN' as BEAN_FREEZING_STORAGE_ENUM,
+    frozenStorageType: 'UNKNOWN',
     frozenNote: '',
     bestDate: '',
     openDate: '',

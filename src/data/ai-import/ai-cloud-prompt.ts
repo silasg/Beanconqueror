@@ -20,7 +20,10 @@ CRITICAL RULES — NEVER VIOLATE:
  * @returns The complete prompt string ready to send to the model.
  */
 export function buildCloudExtractionPrompt(ocrText: string): string {
-  return `The following text was extracted via OCR from a coffee bean bag label.
+  const today = new Date().toISOString().slice(0, 10);
+
+  return `Today's date is ${today}.
+The following text was extracted via OCR from a coffee bean bag label.
 Due to OCR, individual characters might be misread (e.g., 0↔O, 1↔l, 5↔S, 8↔B, rn↔m).
 Please account for these potential misreadings when interpreting the text.
 
@@ -41,7 +44,7 @@ Use "NOT_FOUND" for any field not clearly present.
   "aromatics": "Comma-separated flavor/tasting notes",
   "decaffeinated": true or false,
   "cupping_points": numeric score (typically 80-100),
-  "roasting_date": "YYYY-MM-DD",
+  "roasting_date": "YYYY-MM-DD (use today's date to resolve ambiguous date formats — the roasting date is most likely within the past year and never in the future)",
   "bean_mix": "SINGLE_ORIGIN or BLEND",
   "origins": [
     {

@@ -18,56 +18,94 @@ export interface CloudLLMResponse {
   usage?: { prompt_tokens: number; completion_tokens: number };
 }
 
-function getBaseUrl(
-  provider: CLOUD_AI_PROVIDER_ENUM,
-  customUrl?: string,
-): string {
-  switch (provider) {
-    case CLOUD_AI_PROVIDER_ENUM.OPENAI:
-      return 'https://api.openai.com/v1';
-    case CLOUD_AI_PROVIDER_ENUM.GOOGLE:
-      return 'https://generativelanguage.googleapis.com/v1beta/openai';
-    case CLOUD_AI_PROVIDER_ENUM.ANTHROPIC:
-      return 'https://api.anthropic.com/v1';
-    case CLOUD_AI_PROVIDER_ENUM.MISTRAL:
-      return 'https://api.mistral.ai/v1';
-    case CLOUD_AI_PROVIDER_ENUM.OPENROUTER:
-      return 'https://openrouter.ai/api/v1';
-    case CLOUD_AI_PROVIDER_ENUM.CUSTOM:
-      return (customUrl ?? '').replace(/\/+$/, '');
-    default:
-      return '';
+// ── Provider protocol config ─────────────────────────────────────────
+//
+// Each provider config defines URL, headers, request body shape, and
+// response parsing. The shared sendCloudLLMPrompt function handles
+// fetch, timeout, and error handling — protocol details stay here.
+
+/** Protocol-level config that describes how to talk to a specific LLM API. */
+interface ProviderProtocol {
+  readonly url: string;
+  readonly headers: Record<string, string>;
+  buildRequestBody(model: string, messages: CloudLLMMessage[]): object;
+  parseResponse(body: unknown): CloudLLMResponse;
+}
+
+/** Read a nested property from an unknown value, returning undefined on miss. */
+function dig(obj: unknown, ...keys: (string | number)[]): unknown {
+  let cur = obj;
+  for (const k of keys) {
+    if (cur == null || typeof cur !== 'object') return undefined;
+    cur = (cur as Record<string | number, unknown>)[k];
+  }
+  return cur;
+}
+
+// ── OpenAI-compatible protocol ───────────────────────────────────────
+//
+// Used by OpenAI, Google (Gemini), Mistral, OpenRouter, and Custom.
+// All share the same body format, endpoint, and response shape.
+// Differences are limited to base URL and optional extra headers.
+
+class OpenAICompatibleProtocol implements ProviderProtocol {
+  readonly url: string;
+  readonly headers: Record<string, string>;
+
+  constructor(
+    baseUrl: string,
+    apiKey: string,
+    extraHeaders?: Record<string, string>,
+  ) {
+    this.url = `${baseUrl}/chat/completions`;
+    this.headers = {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      ...extraHeaders,
+    };
+  }
+
+  buildRequestBody(model: string, messages: CloudLLMMessage[]): object {
+    return {
+      model,
+      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+      temperature: 0.1,
+    };
+  }
+
+  // API response shape is not validated — access defensively.
+  parseResponse(body: unknown): CloudLLMResponse {
+    const usage = dig(body, 'usage') as
+      | { prompt_tokens: number; completion_tokens: number }
+      | undefined;
+    return {
+      content: String(dig(body, 'choices', 0, 'message', 'content') ?? ''),
+      model: String(dig(body, 'model') ?? ''),
+      usage,
+    };
   }
 }
 
-function buildHeaders(
-  provider: CLOUD_AI_PROVIDER_ENUM,
-  apiKey: string,
-): Record<string, string> {
-  if (provider === CLOUD_AI_PROVIDER_ENUM.ANTHROPIC) {
-    return {
+// ── Anthropic protocol ───────────────────────────────────────────────
+//
+// Different auth header, API version header, body format (system message
+// extracted, max_tokens required), endpoint (/messages), and response
+// shape (content[].text instead of choices[].message.content).
+
+class AnthropicProtocol implements ProviderProtocol {
+  readonly url: string;
+  readonly headers: Record<string, string>;
+
+  constructor(apiKey: string) {
+    this.url = 'https://api.anthropic.com/v1/messages';
+    this.headers = {
       'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
       'Content-Type': 'application/json',
     };
   }
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${apiKey}`,
-    'Content-Type': 'application/json',
-  };
-  if (provider === CLOUD_AI_PROVIDER_ENUM.OPENROUTER) {
-    headers['HTTP-Referer'] = 'https://beanconqueror.com';
-    headers['X-OpenRouter-Title'] = 'Beanconqueror';
-  }
-  return headers;
-}
 
-function buildRequestBody(
-  provider: CLOUD_AI_PROVIDER_ENUM,
-  model: string,
-  messages: CloudLLMMessage[],
-): object {
-  if (provider === CLOUD_AI_PROVIDER_ENUM.ANTHROPIC) {
+  buildRequestBody(model: string, messages: CloudLLMMessage[]): object {
     const systemMsg = messages.find((m) => m.role === 'system');
     const userMsgs = messages.filter((m) => m.role !== 'system');
     return {
@@ -78,81 +116,90 @@ function buildRequestBody(
       messages: userMsgs.map((m) => ({ role: m.role, content: m.content })),
     };
   }
-  return {
-    model,
-    messages: messages.map((m) => ({ role: m.role, content: m.content })),
-    temperature: 0.1,
-  };
-}
 
-function getEndpointPath(provider: CLOUD_AI_PROVIDER_ENUM): string {
-  if (provider === CLOUD_AI_PROVIDER_ENUM.ANTHROPIC) return '/messages';
-  return '/chat/completions';
-}
-
-interface AnthropicApiResponse {
-  content?: Array<{ text?: string }>;
-  model?: string;
-  usage?: { input_tokens: number; output_tokens: number };
-}
-
-interface OpenAIApiResponse {
-  choices?: Array<{ message?: { content?: string } }>;
-  model?: string;
-  usage?: { prompt_tokens: number; completion_tokens: number };
-}
-
-function parseResponse(
-  provider: CLOUD_AI_PROVIDER_ENUM,
-  body: unknown,
-): CloudLLMResponse {
-  if (provider === CLOUD_AI_PROVIDER_ENUM.ANTHROPIC) {
-    const data = body as AnthropicApiResponse;
+  // API response shape is not validated — access defensively.
+  parseResponse(body: unknown): CloudLLMResponse {
+    const usage = dig(body, 'usage') as Record<string, unknown> | undefined;
     return {
-      content: data.content?.[0]?.text ?? '',
-      model: data.model ?? '',
-      usage: data.usage
+      content: String(dig(body, 'content', 0, 'text') ?? ''),
+      model: String(dig(body, 'model') ?? ''),
+      usage: usage
         ? {
-            prompt_tokens: data.usage.input_tokens,
-            completion_tokens: data.usage.output_tokens,
+            prompt_tokens: Number(usage.input_tokens ?? 0),
+            completion_tokens: Number(usage.output_tokens ?? 0),
           }
         : undefined,
     };
   }
-  const data = body as OpenAIApiResponse;
-  return {
-    content: data.choices?.[0]?.message?.content ?? '',
-    model: data.model ?? '',
-    usage: data.usage,
-  };
 }
+
+// ── Factory ──────────────────────────────────────────────────────────
+
+function createProtocol(config: CloudLLMConfig): ProviderProtocol {
+  switch (config.provider) {
+    case CLOUD_AI_PROVIDER_ENUM.ANTHROPIC:
+      return new AnthropicProtocol(config.apiKey);
+
+    case CLOUD_AI_PROVIDER_ENUM.OPENROUTER:
+      return new OpenAICompatibleProtocol(
+        'https://openrouter.ai/api/v1',
+        config.apiKey,
+        {
+          'HTTP-Referer': 'https://beanconqueror.com',
+          'X-OpenRouter-Title': 'Beanconqueror',
+        },
+      );
+
+    case CLOUD_AI_PROVIDER_ENUM.CUSTOM:
+      return new OpenAICompatibleProtocol(
+        (config.baseUrl ?? '').replace(/\/+$/, ''),
+        config.apiKey,
+      );
+
+    case CLOUD_AI_PROVIDER_ENUM.GOOGLE:
+      return new OpenAICompatibleProtocol(
+        'https://generativelanguage.googleapis.com/v1beta/openai',
+        config.apiKey,
+      );
+
+    case CLOUD_AI_PROVIDER_ENUM.MISTRAL:
+      return new OpenAICompatibleProtocol(
+        'https://api.mistral.ai/v1',
+        config.apiKey,
+      );
+
+    case CLOUD_AI_PROVIDER_ENUM.OPENAI:
+    default:
+      return new OpenAICompatibleProtocol(
+        'https://api.openai.com/v1',
+        config.apiKey,
+      );
+  }
+}
+
+// ── Public API ───────────────────────────────────────────────────────
 
 /**
  * Send a prompt to a cloud LLM provider and return the response.
- * Handles URL construction, headers, request body formatting, and response parsing
- * for all supported providers.
  *
- * @param config Provider configuration (provider, apiKey, model, optional baseUrl)
- * @param messages Array of system/user messages to send
- * @returns Parsed response with content, model, and optional usage stats
+ * Protocol details (URL, headers, body format, response parsing) are
+ * handled by provider-specific config classes. This function handles
+ * only fetch, timeout, and error handling.
  */
 export async function sendCloudLLMPrompt(
   config: CloudLLMConfig,
   messages: CloudLLMMessage[],
 ): Promise<CloudLLMResponse> {
-  const url =
-    getBaseUrl(config.provider, config.baseUrl) +
-    getEndpointPath(config.provider);
-  const headers = buildHeaders(config.provider, config.apiKey);
-  const requestBody = buildRequestBody(config.provider, config.model, messages);
+  const protocol = createProtocol(config);
+  const requestBody = protocol.buildRequestBody(config.model, messages);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
 
   try {
-    const response = await fetch(url, {
+    const response = await fetch(protocol.url, {
       method: 'POST',
-      headers,
+      headers: protocol.headers,
       body: JSON.stringify(requestBody),
       signal: controller.signal,
     });
@@ -164,7 +211,7 @@ export async function sendCloudLLMPrompt(
     }
 
     const body: unknown = await response.json();
-    return parseResponse(config.provider, body);
+    return protocol.parseResponse(body);
   } catch (error) {
     clearTimeout(timeout);
 
