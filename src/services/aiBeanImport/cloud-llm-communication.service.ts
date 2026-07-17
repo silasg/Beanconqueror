@@ -235,6 +235,22 @@ export function resetTemperatureSupportCache(): void {
   temperatureUnsupported.clear();
 }
 
+/**
+ * Seed the cache with previously-learned keys (e.g. persisted in settings) so
+ * the very first request of a session already skips temperature for models
+ * known to reject it.
+ */
+export function hydrateTemperatureSupportCache(keys: readonly string[]): void {
+  for (const key of keys) {
+    temperatureUnsupported.add(key);
+  }
+}
+
+/** Current set of keys known to reject temperature, for persistence. */
+export function snapshotTemperatureSupportCache(): string[] {
+  return Array.from(temperatureUnsupported);
+}
+
 // ── Public API ───────────────────────────────────────────────────────
 
 /** Perform a single request with its own 30s timeout. */

@@ -1,6 +1,9 @@
 import { AI_PROVIDER_ENUM } from '../../../enums/settings/aiProvider';
 import { CloudFieldExtractionService } from '../cloud-field-extraction.service';
-import { CloudLLMConfig } from '../cloud-llm-communication.service';
+import {
+  CloudLLMConfig,
+  resetTemperatureSupportCache,
+} from '../cloud-llm-communication.service';
 
 describe('CloudFieldExtractionService', () => {
   let service: CloudFieldExtractionService;
@@ -584,6 +587,91 @@ describe('CloudFieldExtractionService', () => {
         expect(error).toBeInstanceOf(TypeError);
         expect(error.message).toBe('Failed to fetch');
       }
+    });
+  });
+
+  // ── Temperature-support persistence ────────────────────────────────
+  //
+  // When config is derived from settings, learned temperature rejections are
+  // seeded from and persisted back to settings so they survive app restarts.
+
+  describe('temperature-support persistence', () => {
+    beforeEach(() => resetTemperatureSupportCache());
+
+    function withSettings(settings: {
+      ai_temperature_unsupported_models?: string[];
+    }): { saveSettings: jasmine.Spy; settings: any } {
+      const fullSettings = {
+        ai_provider: AI_PROVIDER_ENUM.OPENAI,
+        cloud_ai_api_key: 'test-key',
+        cloud_ai_model: 'gpt-5.6-terra',
+        cloud_ai_base_url: '',
+        ai_temperature_unsupported_models: [],
+        ...settings,
+      };
+      const saveSettings = jasmine.createSpy('saveSettings').and.resolveTo(
+        undefined,
+      );
+      (service as any).uiSettingsStorage = {
+        getSettings: () => fullSettings,
+        saveSettings,
+      };
+      return { saveSettings, settings: fullSettings };
+    }
+
+    it('persists a newly-learned temperature rejection to settings', async () => {
+      // Arrange
+      const { saveSettings, settings } = withSettings({});
+      fetchSpy.and.returnValues(
+        Promise.resolve({
+          ok: false,
+          status: 400,
+          text: () => Promise.resolve("unsupported 'temperature'"),
+        } as unknown as Response),
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              choices: [{ message: { content: '{"name":"X"}' } }],
+              model: 'gpt-5.6-terra',
+            }),
+        } as unknown as Response),
+      );
+
+      // Act — no explicit config, so settings drive the request
+      await service.extractAllFields('sample OCR text', undefined, mockLogger);
+
+      // Assert
+      expect(saveSettings).toHaveBeenCalledTimes(1);
+      expect(settings.ai_temperature_unsupported_models).toContain(
+        'OPENAI::::gpt-5.6-terra',
+      );
+    });
+
+    it('does not re-save when nothing new is learned', async () => {
+      // Arrange: model already known to reject temperature
+      const { saveSettings } = withSettings({
+        ai_temperature_unsupported_models: ['OPENAI::::gpt-5.6-terra'],
+      });
+      fetchSpy.and.returnValue(
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              choices: [{ message: { content: '{"name":"X"}' } }],
+              model: 'gpt-5.6-terra',
+            }),
+        } as unknown as Response),
+      );
+
+      // Act
+      await service.extractAllFields('sample OCR text', undefined, mockLogger);
+
+      // Assert — a single request (temperature skipped) and no settings write
+      expect(fetchSpy.calls.count()).toBe(1);
+      expect(saveSettings).not.toHaveBeenCalled();
     });
   });
 });

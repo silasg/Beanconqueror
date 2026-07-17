@@ -1,6 +1,7 @@
 import { inject, Injectable } from '@angular/core';
 
 import { Bean } from '../../classes/bean/bean';
+import { Settings } from '../../classes/settings/settings';
 import {
   buildCloudExtractionPrompt,
   CLOUD_BEAN_IMPORT_SYSTEM_INSTRUCTIONS,
@@ -20,7 +21,9 @@ import {
 } from './bean-extraction-types';
 import {
   CloudLLMConfig,
+  hydrateTemperatureSupportCache,
   sendCloudLLMPrompt,
+  snapshotTemperatureSupportCache,
 } from './cloud-llm-communication.service';
 import {
   extractJsonFromResponse,
@@ -51,9 +54,19 @@ export class CloudFieldExtractionService {
   ): Promise<Bean> {
     const log = logger ?? this.uiLog ?? { log: () => {} };
 
-    // 1. Build config from settings if not provided
+    // 1. Build config from settings if not provided. When we derive the config
+    //    from settings, we also seed and persist the set of models that reject
+    //    an explicit temperature so that knowledge survives app restarts.
+    let settingsForPersistence: Settings | undefined;
+    let persistedUnsupportedCount = 0;
     if (!config) {
       const settings = this.uiSettingsStorage!.getSettings();
+      settingsForPersistence = settings;
+      persistedUnsupportedCount =
+        settings.ai_temperature_unsupported_models?.length ?? 0;
+      hydrateTemperatureSupportCache(
+        settings.ai_temperature_unsupported_models ?? [],
+      );
       config = {
         provider: settings.ai_provider,
         apiKey: settings.cloud_ai_api_key,
@@ -62,38 +75,50 @@ export class CloudFieldExtractionService {
       };
     }
 
-    // 2. Build prompt
-    const userPrompt = buildCloudExtractionPrompt(ocrText);
+    try {
+      // 2. Build prompt
+      const userPrompt = buildCloudExtractionPrompt(ocrText);
 
-    // 3. Send to cloud LLM — throws on API errors, timeouts, network failures
-    log.log('[Cloud LLM] model: ' + config.model);
-    log.log('[Cloud LLM] prompt: ' + userPrompt);
+      // 3. Send to cloud LLM — throws on API errors, timeouts, network failures
+      log.log('[Cloud LLM] model: ' + config.model);
+      log.log('[Cloud LLM] prompt: ' + userPrompt);
 
-    const response = await sendCloudLLMPrompt(config, [
-      { role: 'system', content: CLOUD_BEAN_IMPORT_SYSTEM_INSTRUCTIONS },
-      { role: 'user', content: userPrompt },
-    ]);
+      const response = await sendCloudLLMPrompt(config, [
+        { role: 'system', content: CLOUD_BEAN_IMPORT_SYSTEM_INSTRUCTIONS },
+        { role: 'user', content: userPrompt },
+      ]);
 
-    log.log('[Cloud LLM] response: ' + response.content);
-    if (response.usage) {
-      log.log(
-        `Token usage: ${response.usage.prompt_tokens} prompt, ${response.usage.completion_tokens} completion`,
-      );
+      log.log('[Cloud LLM] response: ' + response.content);
+      if (response.usage) {
+        log.log(
+          `Token usage: ${response.usage.prompt_tokens} prompt, ${response.usage.completion_tokens} completion`,
+        );
+      }
+
+      // 4. Parse JSON from response (handle potential markdown wrapping)
+      // LLM response is unvalidated — all field access below is defensive
+      const parsed = extractJsonFromResponse(response.content);
+      if (!parsed) {
+        throw new Error('Failed to parse JSON from cloud LLM response');
+      }
+
+      // 5. Map to TopLevelFieldsResult + OriginFieldsResult
+      const topLevel = this.mapTopLevelFields(parsed);
+      const origin = this.mapOriginFields(parsed);
+
+      // 6. Construct bean using shared utility
+      return constructBeanFromExtractedData(topLevel, origin);
+    } finally {
+      // Persist any temperature rejections learned during this request, even
+      // when it ultimately failed — the knowledge is still valid.
+      if (settingsForPersistence) {
+        const learned = snapshotTemperatureSupportCache();
+        if (learned.length !== persistedUnsupportedCount) {
+          settingsForPersistence.ai_temperature_unsupported_models = learned;
+          await this.uiSettingsStorage!.saveSettings(settingsForPersistence);
+        }
+      }
     }
-
-    // 4. Parse JSON from response (handle potential markdown wrapping)
-    // LLM response is unvalidated — all field access below is defensive
-    const parsed = extractJsonFromResponse(response.content);
-    if (!parsed) {
-      throw new Error('Failed to parse JSON from cloud LLM response');
-    }
-
-    // 5. Map to TopLevelFieldsResult + OriginFieldsResult
-    const topLevel = this.mapTopLevelFields(parsed);
-    const origin = this.mapOriginFields(parsed);
-
-    // 6. Construct bean using shared utility
-    return constructBeanFromExtractedData(topLevel, origin);
   }
 
   /**

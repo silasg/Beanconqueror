@@ -236,6 +236,9 @@ export interface ISettings {
   cloud_ai_api_key: string;
   cloud_ai_model: string;
   cloud_ai_base_url: string;
+  // Provider+model keys that have rejected an explicit temperature, so we can
+  // skip sending it across app restarts (see cloud-llm-communication.service).
+  ai_temperature_unsupported_models: string[];
 
   show_backup_issues: boolean;
 

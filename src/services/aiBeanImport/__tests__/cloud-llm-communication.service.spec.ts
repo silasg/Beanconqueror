@@ -2,8 +2,10 @@ import { AI_PROVIDER_ENUM } from '../../../enums/settings/aiProvider';
 import {
   CloudLLMConfig,
   CloudLLMMessage,
+  hydrateTemperatureSupportCache,
   resetTemperatureSupportCache,
   sendCloudLLMPrompt,
+  snapshotTemperatureSupportCache,
 } from '../cloud-llm-communication.service';
 
 describe('cloud-llm-communication.service', () => {
@@ -533,6 +535,47 @@ describe('cloud-llm-communication.service', () => {
       expect(fetchSpy.calls.count()).toBe(1);
       const body = JSON.parse(fetchSpy.calls.mostRecent().args[1].body);
       expect('temperature' in body).toBe(false);
+    });
+
+    it('skips temperature up front for a hydrated (persisted) model', async () => {
+      // WHY: persisted rejections are seeded at startup so the first request
+      // of a session already avoids the wasted attempt.
+
+      // Arrange
+      const config = createConfig({
+        provider: AI_PROVIDER_ENUM.OPENAI,
+        model: 'gpt-5.6-terra',
+      });
+      hydrateTemperatureSupportCache([`${config.provider}::::${config.model}`]);
+      fetchSpy.and.returnValue(Promise.resolve(openaiSuccess()));
+
+      // Act
+      await sendCloudLLMPrompt(config, messages);
+
+      // Assert
+      expect(fetchSpy.calls.count()).toBe(1);
+      const body = JSON.parse(fetchSpy.calls.mostRecent().args[1].body);
+      expect('temperature' in body).toBe(false);
+    });
+
+    it('exposes learned rejections via snapshot for persistence', async () => {
+      // Arrange
+      const config = createConfig({
+        provider: AI_PROVIDER_ENUM.OPENAI,
+        model: 'gpt-5.6-terra',
+      });
+      fetchSpy.and.returnValues(
+        Promise.resolve(mockErrorResponse(400, "unsupported 'temperature'")),
+        Promise.resolve(openaiSuccess()),
+      );
+
+      // Act
+      await sendCloudLLMPrompt(config, messages);
+
+      // Assert
+      expect(snapshotTemperatureSupportCache()).toContain(
+        `${config.provider}::::${config.model}`,
+      );
     });
 
     it('keeps the low temperature for models that accept it', async () => {
