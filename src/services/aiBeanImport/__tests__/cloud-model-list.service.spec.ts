@@ -252,6 +252,51 @@ describe('cloud-model-list.service', () => {
       expect(gpt4o.contextLength).toBe(128000);
       expect(claude.contextLength).toBe(200000);
     });
+
+    it('should derive supportsTemperature from supported_parameters', async () => {
+      // Arrange
+      fetchSpy.and.returnValue(
+        Promise.resolve(
+          mockFetchResponse({
+            data: [
+              {
+                id: 'openai/gpt-4o',
+                name: 'GPT-4o',
+                supported_parameters: ['temperature', 'top_p', 'tools'],
+              },
+              {
+                id: 'openai/gpt-5.6-terra',
+                name: 'GPT-5.6 Terra',
+                supported_parameters: ['top_p', 'tools'],
+              },
+              {
+                id: 'some/model-without-metadata',
+                name: 'No Metadata',
+              },
+            ],
+          }),
+        ),
+      );
+
+      // Act
+      const models = await fetchAvailableModels(
+        AI_PROVIDER_ENUM.OPENROUTER,
+        '',
+      );
+
+      // Assert
+      expect(
+        models.find((m) => m.id === 'openai/gpt-4o').supportsTemperature,
+      ).toBe(true);
+      expect(
+        models.find((m) => m.id === 'openai/gpt-5.6-terra').supportsTemperature,
+      ).toBe(false);
+      // No supported_parameters advertised → unknown, left undefined.
+      expect(
+        models.find((m) => m.id === 'some/model-without-metadata')
+          .supportsTemperature,
+      ).toBeUndefined();
+    });
   });
 
   describe('OpenAI', () => {

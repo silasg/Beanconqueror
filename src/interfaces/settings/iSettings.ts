@@ -236,6 +236,9 @@ export interface ISettings {
   cloud_ai_api_key: string;
   cloud_ai_model: string;
   cloud_ai_base_url: string;
+  // Whether the selected model accepts an explicit temperature, when the
+  // provider advertises it (OpenRouter). null = unknown, decided at runtime.
+  cloud_ai_model_supports_temperature: boolean | null;
 
   show_backup_issues: boolean;
 

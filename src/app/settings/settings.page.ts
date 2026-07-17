@@ -583,6 +583,7 @@ export class SettingsPage {
     this.settings.cloud_ai_api_key = '';
     this.settings.cloud_ai_model = '';
     this.settings.cloud_ai_base_url = '';
+    this.settings.cloud_ai_model_supports_temperature = null;
     this.saveSettings();
   }
 
@@ -619,6 +620,11 @@ export class SettingsPage {
     const { data } = await modal.onWillDismiss();
     if (data?.modelId) {
       this.settings.cloud_ai_model = data.modelId;
+      // Capability advertised by the provider (OpenRouter); null when unknown.
+      this.settings.cloud_ai_model_supports_temperature =
+        typeof data.supportsTemperature === 'boolean'
+          ? data.supportsTemperature
+          : null;
       this.saveSettings();
     }
   }

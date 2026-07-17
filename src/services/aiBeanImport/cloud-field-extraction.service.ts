@@ -59,6 +59,10 @@ export class CloudFieldExtractionService {
         apiKey: settings.cloud_ai_api_key,
         model: settings.cloud_ai_model,
         baseUrl: settings.cloud_ai_base_url || undefined,
+        // Skip the first (doomed) attempt when the provider already told us the
+        // model rejects an explicit temperature.
+        supportsTemperature:
+          settings.cloud_ai_model_supports_temperature ?? undefined,
       };
     }
 

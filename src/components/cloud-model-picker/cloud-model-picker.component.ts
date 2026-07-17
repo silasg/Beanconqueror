@@ -96,7 +96,7 @@ export class CloudModelPickerComponent implements OnInit {
 
   selectModel(model: CloudModel): void {
     void this.modalCtrl.dismiss(
-      { modelId: model.id },
+      { modelId: model.id, supportsTemperature: model.supportsTemperature },
       'confirm',
       CloudModelPickerComponent.COMPONENT_ID,
     );

@@ -4,6 +4,9 @@ export interface CloudModel {
   id: string;
   name: string;
   contextLength?: number;
+  // Whether the model accepts an explicit `temperature`, when the provider
+  // advertises it (OpenRouter's supported_parameters). undefined = unknown.
+  supportsTemperature?: boolean;
 }
 
 const TIMEOUT_MS = 15000;
@@ -42,6 +45,7 @@ interface RawOpenRouterModel {
   id: string;
   name?: string;
   context_length?: number;
+  supported_parameters?: string[];
 }
 
 interface RawCustomModel {
@@ -167,6 +171,9 @@ function buildProviderConfig(
             id: m.id,
             name: m.name ?? m.id,
             contextLength: m.context_length,
+            supportsTemperature: Array.isArray(m.supported_parameters)
+              ? m.supported_parameters.includes('temperature')
+              : undefined,
           };
         },
       };
