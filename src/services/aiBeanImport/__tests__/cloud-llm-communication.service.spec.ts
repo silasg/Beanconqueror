@@ -2,6 +2,7 @@ import { AI_PROVIDER_ENUM } from '../../../enums/settings/aiProvider';
 import {
   CloudLLMConfig,
   CloudLLMMessage,
+  resetTemperatureSupportCache,
   sendCloudLLMPrompt,
 } from '../cloud-llm-communication.service';
 
@@ -38,8 +39,19 @@ describe('cloud-llm-communication.service', () => {
     } as unknown as Response;
   }
 
+  function mockErrorResponse(status: number, text: string): Response {
+    return {
+      ok: false,
+      status,
+      text: () => Promise.resolve(text),
+    } as unknown as Response;
+  }
+
   beforeEach(() => {
     fetchSpy = spyOn(globalThis, 'fetch');
+    // The service learns (per session) which models reject an explicit
+    // temperature. Reset that between tests so cases stay independent.
+    resetTemperatureSupportCache();
   });
 
   // ── Request building per provider ──────────────────────────────────
@@ -415,6 +427,136 @@ describe('cloud-llm-communication.service', () => {
       await expectAsync(sendCloudLLMPrompt(config, messages)).toBeRejectedWith(
         jasmine.any(TypeError),
       );
+    });
+  });
+
+  // ── Temperature capability adaptation ──────────────────────────────
+  //
+  // Some models (e.g. OpenAI GPT-5.x reasoning models) reject an explicit
+  // temperature with a 400. We send it best-effort, and when it is
+  // rejected we drop it, retry once, and remember the model so later
+  // requests skip it. Models that accept temperature keep the
+  // deterministic low value.
+
+  describe('temperature capability adaptation', () => {
+    const openaiSuccess = () =>
+      mockFetchResponse({
+        choices: [{ message: { content: 'ok' } }],
+        model: 'gpt-5.6-terra',
+      });
+
+    it('retries without temperature when the model rejects it', async () => {
+      // Arrange
+      const config = createConfig({
+        provider: AI_PROVIDER_ENUM.OPENAI,
+        model: 'gpt-5.6-terra',
+      });
+      fetchSpy.and.returnValues(
+        Promise.resolve(
+          mockErrorResponse(
+            400,
+            "Unsupported value: 'temperature' does not support 0.1 with " +
+              'this model. Only the default (1) value is supported.',
+          ),
+        ),
+        Promise.resolve(openaiSuccess()),
+      );
+
+      // Act
+      const result = await sendCloudLLMPrompt(config, messages);
+
+      // Assert
+      expect(result.content).toBe('ok');
+      expect(fetchSpy.calls.count()).toBe(2);
+      const firstBody = JSON.parse(fetchSpy.calls.argsFor(0)[1].body);
+      const secondBody = JSON.parse(fetchSpy.calls.argsFor(1)[1].body);
+      expect(firstBody.temperature).toBe(0.1);
+      expect('temperature' in secondBody).toBe(false);
+    });
+
+    it('remembers the rejection and omits temperature on later calls for the same model', async () => {
+      // Arrange: prime the cache with a reject-then-retry cycle.
+      const config = createConfig({
+        provider: AI_PROVIDER_ENUM.OPENAI,
+        model: 'gpt-5.6-terra',
+      });
+      fetchSpy.and.returnValues(
+        Promise.resolve(mockErrorResponse(400, "unsupported 'temperature'")),
+        Promise.resolve(openaiSuccess()),
+      );
+      await sendCloudLLMPrompt(config, messages);
+
+      // Act: a fresh call for the same model should skip temperature outright.
+      fetchSpy.calls.reset();
+      fetchSpy.and.returnValue(Promise.resolve(openaiSuccess()));
+      await sendCloudLLMPrompt(config, messages);
+
+      // Assert
+      expect(fetchSpy.calls.count()).toBe(1);
+      const body = JSON.parse(fetchSpy.calls.mostRecent().args[1].body);
+      expect('temperature' in body).toBe(false);
+    });
+
+    it('does not retry when a 400 is unrelated to temperature', async () => {
+      // Arrange
+      const config = createConfig({
+        provider: AI_PROVIDER_ENUM.OPENAI,
+        model: 'gpt-4o',
+      });
+      fetchSpy.and.returnValue(
+        Promise.resolve(mockErrorResponse(400, 'Invalid request: bad input')),
+      );
+
+      // Act & Assert
+      await expectAsync(
+        sendCloudLLMPrompt(config, messages),
+      ).toBeRejectedWithError(/Cloud LLM API error \(400\)/);
+      expect(fetchSpy.calls.count()).toBe(1);
+    });
+
+    it('omits temperature from the first request when supportsTemperature is false', async () => {
+      // WHY: OpenRouter exposes supported_parameters, so a caller can tell us
+      // up front and skip even the first failed attempt.
+
+      // Arrange
+      const config = createConfig({
+        provider: AI_PROVIDER_ENUM.OPENROUTER,
+        model: 'openai/gpt-5.6-terra',
+        supportsTemperature: false,
+      });
+      fetchSpy.and.returnValue(Promise.resolve(openaiSuccess()));
+
+      // Act
+      await sendCloudLLMPrompt(config, messages);
+
+      // Assert
+      expect(fetchSpy.calls.count()).toBe(1);
+      const body = JSON.parse(fetchSpy.calls.mostRecent().args[1].body);
+      expect('temperature' in body).toBe(false);
+    });
+
+    it('keeps the low temperature for models that accept it', async () => {
+      // Arrange
+      const config = createConfig({
+        provider: AI_PROVIDER_ENUM.ANTHROPIC,
+        model: 'claude-sonnet-4-20250514',
+      });
+      fetchSpy.and.returnValue(
+        Promise.resolve(
+          mockFetchResponse({
+            content: [{ text: 'ok' }],
+            model: 'claude-sonnet-4-20250514',
+          }),
+        ),
+      );
+
+      // Act
+      await sendCloudLLMPrompt(config, messages);
+
+      // Assert
+      const body = JSON.parse(fetchSpy.calls.mostRecent().args[1].body);
+      expect(body.temperature).toBe(0.1);
+      expect(fetchSpy.calls.count()).toBe(1);
     });
   });
 });

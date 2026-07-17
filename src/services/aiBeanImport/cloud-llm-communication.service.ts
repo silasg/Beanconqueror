@@ -5,6 +5,10 @@ export interface CloudLLMConfig {
   apiKey: string;
   model: string;
   baseUrl?: string; // for CUSTOM provider
+  // Set to false when the caller already knows the model rejects an explicit
+  // temperature (e.g. from OpenRouter's supported_parameters), so we skip
+  // sending it up front instead of learning from a failed request.
+  supportsTemperature?: boolean;
 }
 
 export interface CloudLLMMessage {
@@ -24,11 +28,26 @@ export interface CloudLLMResponse {
 // response parsing. The shared sendCloudLLMPrompt function handles
 // fetch, timeout, and error handling — protocol details stay here.
 
+// Low temperature keeps label extraction deterministic. It is sent
+// best-effort: models that reject an explicit temperature fall back to their
+// default (see sendCloudLLMPrompt).
+const DEFAULT_TEMPERATURE = 0.1;
+
+/** Options that influence how a request body is built. */
+interface BuildOptions {
+  /** Whether to include the temperature parameter in the request body. */
+  includeTemperature: boolean;
+}
+
 /** Protocol-level config that describes how to talk to a specific LLM API. */
 interface ProviderProtocol {
   readonly url: string;
   readonly headers: Record<string, string>;
-  buildRequestBody(model: string, messages: CloudLLMMessage[]): object;
+  buildRequestBody(
+    model: string,
+    messages: CloudLLMMessage[],
+    options: BuildOptions,
+  ): object;
   parseResponse(body: unknown): CloudLLMResponse;
 }
 
@@ -65,11 +84,15 @@ class OpenAICompatibleProtocol implements ProviderProtocol {
     };
   }
 
-  buildRequestBody(model: string, messages: CloudLLMMessage[]): object {
+  buildRequestBody(
+    model: string,
+    messages: CloudLLMMessage[],
+    { includeTemperature }: BuildOptions,
+  ): object {
     return {
       model,
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
-      temperature: 0.1,
+      ...(includeTemperature ? { temperature: DEFAULT_TEMPERATURE } : {}),
     };
   }
 
@@ -105,13 +128,17 @@ class AnthropicProtocol implements ProviderProtocol {
     };
   }
 
-  buildRequestBody(model: string, messages: CloudLLMMessage[]): object {
+  buildRequestBody(
+    model: string,
+    messages: CloudLLMMessage[],
+    { includeTemperature }: BuildOptions,
+  ): object {
     const systemMsg = messages.find((m) => m.role === 'system');
     const userMsgs = messages.filter((m) => m.role !== 'system');
     return {
       model,
       max_tokens: 4096,
-      temperature: 0.1,
+      ...(includeTemperature ? { temperature: DEFAULT_TEMPERATURE } : {}),
       system: systemMsg?.content ?? '',
       messages: userMsgs.map((m) => ({ role: m.role, content: m.content })),
     };
@@ -177,44 +204,121 @@ function createProtocol(config: CloudLLMConfig): ProviderProtocol {
   }
 }
 
+// ── Temperature capability adaptation ────────────────────────────────
+//
+// A few models (notably OpenAI's GPT-5.x / reasoning family) reject an
+// explicit temperature with a 400 and only accept their default value.
+// Rather than maintain a model-name list, we send temperature best-effort:
+// if a request is rejected specifically because of temperature, we drop it,
+// retry once, and remember the model+provider so later requests skip it.
+// This keeps the deterministic low temperature on every model that honors
+// it and self-heals for models (present and future) that do not.
+
+const temperatureUnsupported = new Set<string>();
+
+function temperatureCacheKey(config: CloudLLMConfig): string {
+  return `${config.provider}::${config.baseUrl ?? ''}::${config.model}`;
+}
+
+/** True when a response was rejected specifically because of temperature. */
+function isTemperatureRejection(status: number, errorBody: string): boolean {
+  return status === 400 && /temperature/i.test(errorBody);
+}
+
+/**
+ * Reset the learned temperature-support cache.
+ *
+ * The cache is a session-lifetime optimization; this is primarily useful for
+ * tests, but also lets callers clear it if a model's capabilities change.
+ */
+export function resetTemperatureSupportCache(): void {
+  temperatureUnsupported.clear();
+}
+
 // ── Public API ───────────────────────────────────────────────────────
+
+/** Perform a single request with its own 30s timeout. */
+async function performRequest(
+  protocol: ProviderProtocol,
+  model: string,
+  messages: CloudLLMMessage[],
+  includeTemperature: boolean,
+): Promise<Response> {
+  const requestBody = protocol.buildRequestBody(model, messages, {
+    includeTemperature,
+  });
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  try {
+    return await fetch(protocol.url, {
+      method: 'POST',
+      headers: protocol.headers,
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 /**
  * Send a prompt to a cloud LLM provider and return the response.
  *
  * Protocol details (URL, headers, body format, response parsing) are
  * handled by provider-specific config classes. This function handles
- * only fetch, timeout, and error handling.
+ * fetch, timeout, error handling, and the temperature fallback described
+ * above.
  */
 export async function sendCloudLLMPrompt(
   config: CloudLLMConfig,
   messages: CloudLLMMessage[],
 ): Promise<CloudLLMResponse> {
   const protocol = createProtocol(config);
-  const requestBody = protocol.buildRequestBody(config.model, messages);
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30000);
+  const cacheKey = temperatureCacheKey(config);
+  const includeTemperature =
+    config.supportsTemperature !== false &&
+    !temperatureUnsupported.has(cacheKey);
 
   try {
-    const response = await fetch(protocol.url, {
-      method: 'POST',
-      headers: protocol.headers,
-      body: JSON.stringify(requestBody),
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
+    let response = await performRequest(
+      protocol,
+      config.model,
+      messages,
+      includeTemperature,
+    );
 
     if (!response.ok) {
       const errorBody = await response.text().catch(() => '');
-      throw new Error(`Cloud LLM API error (${response.status}): ${errorBody}`);
+
+      // Retry once without temperature when that is what was rejected.
+      if (
+        includeTemperature &&
+        isTemperatureRejection(response.status, errorBody)
+      ) {
+        temperatureUnsupported.add(cacheKey);
+        response = await performRequest(
+          protocol,
+          config.model,
+          messages,
+          false,
+        );
+        if (!response.ok) {
+          const retryErrorBody = await response.text().catch(() => '');
+          throw new Error(
+            `Cloud LLM API error (${response.status}): ${retryErrorBody}`,
+          );
+        }
+      } else {
+        throw new Error(
+          `Cloud LLM API error (${response.status}): ${errorBody}`,
+        );
+      }
     }
 
     const body: unknown = await response.json();
     return protocol.parseResponse(body);
   } catch (error) {
-    clearTimeout(timeout);
-
     if (error.name === 'AbortError') {
       throw new Error('Cloud LLM request timed out after 30 seconds');
     }
